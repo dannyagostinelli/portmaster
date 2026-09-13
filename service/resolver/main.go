@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -151,6 +152,18 @@ func getLocalAddr(network string) net.Addr {
 		return localAddrFactory(network)
 	}
 	return nil
+}
+
+// localBindAttempts is how often a query is retried with a different local
+// port when binding fails, as the OS may have reserved the port.
+const localBindAttempts = 3
+
+// isLocalBindError reports whether err is a failure to bind the local address.
+// The query never left the host in that case, which makes it safe to retry
+// with a different local port.
+func isLocalBindError(err error) bool {
+	var syscallErr *os.SyscallError
+	return errors.As(err, &syscallErr) && syscallErr.Syscall == "bind"
 }
 
 var (

@@ -142,15 +142,30 @@ func (tr *TCPResolver) getOrCreateResolverConn(ctx context.Context) (*tcpResolve
 
 	// Create a new if no active one is available.
 
-	// Refresh the dialer in order to set an authenticated local address.
-	tr.dnsClient.Dialer = &net.Dialer{
-		LocalAddr: getLocalAddr("tcp"),
-		Timeout:   tcpConnectionEstablishmentTimeout,
-		KeepAlive: defaultClientTTL,
-	}
+	// Connect to server, retrying with another local port if binding fails.
+	var (
+		conn *dns.Conn
+		err  error
+	)
+	for range localBindAttempts {
+		// Refresh the dialer in order to set an authenticated local address.
+		tr.dnsClient.Dialer = &net.Dialer{
+			LocalAddr: getLocalAddr("tcp"),
+			Timeout:   tcpConnectionEstablishmentTimeout,
+			KeepAlive: defaultClientTTL,
+		}
 
-	// Connect to server.
-	conn, err := tr.dnsClient.Dial(tr.resolver.ServerAddress)
+		conn, err = tr.dnsClient.Dial(tr.resolver.ServerAddress)
+		if !isLocalBindError(err) {
+			break
+		}
+
+		log.Debugf(
+			"resolver: failed to bind local port for connection to %s, retrying: %s",
+			tr.resolver.Info.DescriptiveName(),
+			err,
+		)
+	}
 	if err != nil {
 		// Hint network environment at failed connection.
 		netenv.ReportFailedConnection()

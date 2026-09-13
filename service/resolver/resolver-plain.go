@@ -59,13 +59,30 @@ func (pr *PlainResolver) Query(ctx context.Context, q *Query) (*RRCache, error) 
 		UDPSize: 1024,
 		Timeout: timeout,
 		Dialer: &net.Dialer{
-			Timeout:   timeout,
-			LocalAddr: getLocalAddr("udp"),
+			Timeout: timeout,
 		},
 	}
 
-	// query server
-	reply, ttl, err := dnsClient.Exchange(dnsQuery, pr.resolver.ServerAddress)
+	// query server, retrying with another local port if binding fails
+	var (
+		reply *dns.Msg
+		ttl   time.Duration
+		err   error
+	)
+	for range localBindAttempts {
+		dnsClient.Dialer.LocalAddr = getLocalAddr("udp")
+
+		reply, ttl, err = dnsClient.Exchange(dnsQuery, pr.resolver.ServerAddress)
+		if !isLocalBindError(err) {
+			break
+		}
+
+		log.Tracer(ctx).Debugf(
+			"resolver: failed to bind local port for query to %s, retrying: %s",
+			pr.resolver.Info.ID(),
+			err,
+		)
+	}
 	log.Tracer(ctx).Tracef("resolver: query took %s", ttl)
 	// error handling
 	if err != nil {
